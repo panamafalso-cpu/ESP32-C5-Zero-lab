@@ -32,23 +32,23 @@ static void macstr(const uint8_t *m,char *o){sprintf(o,"%02X:%02X:%02X:%02X:%02X
 static esp_err_t index_get(httpd_req_t *req){httpd_resp_set_type(req,"text/html");return httpd_resp_send(req,INDEX_HTML,HTTPD_RESP_USE_STRLEN);}
 static esp_err_t info_get(httpd_req_t *req){
  uint8_t mac[6];ESP_ERROR_CHECK(esp_wifi_get_mac(WIFI_IF_AP,mac));char m[18];macstr(mac,m);
- char b[384];snprintf(b,sizeof(b),"{"ssid":"%s","mac":"%s","channel":%d,"ip":"192.168.4.1"}",LAB_AP_SSID,m,LAB_AP_CHANNEL);
+ char b[384];snprintf(b,sizeof(b),"{\"ssid\":\"%s\",\"mac\":\"%s\",\"channel\":%d,\"ip\":\"192.168.4.1\"}",LAB_AP_SSID,m,LAB_AP_CHANNEL);
  httpd_resp_set_type(req,"application/json");return httpd_resp_send(req,b,HTTPD_RESP_USE_STRLEN);
 }
 static esp_err_t scan_get(httpd_req_t *req){
  esp_wifi_set_promiscuous(false);
  wifi_scan_config_t cfg={0};cfg.show_hidden=true;cfg.scan_type=WIFI_SCAN_TYPE_ACTIVE;
- esp_err_t e=esp_wifi_scan_start(&cfg,true);if(e!=ESP_OK){httpd_resp_set_status(req,"500 Internal Server Error");return httpd_resp_sendstr(req,"{"error":"scan failed"}");}
+ esp_err_t e=esp_wifi_scan_start(&cfg,true);if(e!=ESP_OK){httpd_resp_set_status(req,"500 Internal Server Error");return httpd_resp_sendstr(req,"{\"error\":\"scan failed\"}");}
  uint16_t n=MAX_SCAN;wifi_ap_record_t a[MAX_SCAN];e=esp_wifi_scan_get_ap_records(&n,a);
- if(e!=ESP_OK){httpd_resp_set_status(req,"500 Internal Server Error");return httpd_resp_sendstr(req,"{"error":"results failed"}");}
- char *out=malloc(10000);if(!out)return ESP_ERR_NO_MEM;int p=snprintf(out,10000,"{"count":%u,"results":[",(unsigned)n);
- for(int i=0;i<n&&p<9700;i++){char m[18];macstr(a[i].bssid,m);p+=snprintf(out+p,10000-p,"%s{"ssid":"%s","bssid":"%s","channel":%u,"rssi":%d,"auth":"%s"}",i?",":"",a[i].ssid,m,a[i].primary,a[i].rssi,auth_name(a[i].authmode));}
+ if(e!=ESP_OK){httpd_resp_set_status(req,"500 Internal Server Error");return httpd_resp_sendstr(req,"{\"error\":\"results failed\"}");}
+ char *out=malloc(10000);if(!out)return ESP_ERR_NO_MEM;int p=snprintf(out,10000,"{\"count\":%u,\"results\":[",(unsigned)n);
+ for(int i=0;i<n&&p<9700;i++){char m[18];macstr(a[i].bssid,m);p+=snprintf(out+p,10000-p,"%s{\"ssid\":\"%s\",\"bssid\":\"%s\",\"channel\":%u,\"rssi\":%d,\"auth\":\"%s\"}",i?",":"",a[i].ssid,m,a[i].primary,a[i].rssi,auth_name(a[i].authmode));}
  snprintf(out+p,10000-p,"]}");httpd_resp_set_type(req,"application/json");esp_err_t r=httpd_resp_send(req,out,HTTPD_RESP_USE_STRLEN);free(out);return r;
 }
 static httpd_handle_t start_web_server(void){
  httpd_config_t c=HTTPD_DEFAULT_CONFIG();c.max_uri_handlers=6;httpd_handle_t s=NULL;if(httpd_start(&s,&c)!=ESP_OK)return NULL;
  const httpd_uri_t u[]={{.uri="/",.method=HTTP_GET,.handler=index_get},{.uri="/api/info",.method=HTTP_GET,.handler=info_get},{.uri="/api/scan",.method=HTTP_GET,.handler=scan_get}};
- for(size_t i=0;i<3;i++)ESP_ERROR_CHECK(httpd_register_uri_handler(s,&u[i]));return s;
+ for(size_t i=0;i<3;i++){ ESP_ERROR_CHECK(httpd_register_uri_handler(s,&u[i])); }\n return s;
 }
 static void wifi_event_handler(void *arg,esp_event_base_t base,int32_t id,void *data){
  if(id==WIFI_EVENT_AP_STACONNECTED){wifi_event_ap_staconnected_t *e=data;ESP_LOGI(TAG,"Station connected: "MACSTR,MAC2STR(e->mac));}
