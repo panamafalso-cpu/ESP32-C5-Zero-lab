@@ -23,9 +23,9 @@ static const char INDEX_HTML[] =
 "<style>body{font-family:system-ui;background:#101318;color:#eee;padding:16px}.card{background:#191e26;padding:14px;margin:10px 0;border-radius:12px}button{padding:10px;margin:4px;border:0;border-radius:8px;background:#2875e8;color:white}table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #333;text-align:left}.muted{color:#aaa}</style></head>"
 "<body><h1>C5-Lab</h1><div class='card'><b>Uso autorizado únicamente</b><p class='muted'>Utiliza esta herramienta solo en redes y dispositivos que tengas permiso para auditar. Bajo tu propia responsabilidad.</p></div>"
 "<div class='card'><h2>Wi-Fi</h2><button onclick='scan()'>Escanear redes</button><span id='s'></span><div id='r'></div></div>"
-"<div class='card'><h2>Monitor / Sniffer</h2><button onclick='mon(1)'>Iniciar</button><button onclick='mon(0)'>Parar</button><button onclick='resetm()'>Reset</button><pre id='m'>Monitor detenido</pre><hr><b>Deauth de laboratorio</b><p class='muted'>Solo desconecta un cliente asociado al propio C5-Lab.</p><button onclick='stations()'>Ver clientes</button><div id='st'></div></div>" "<div class='card'><h2>Equipo</h2><button onclick='info()'>Device Info</button><pre id='i'></pre></div>"
-"<script>async function scan(){s.textContent=' escaneando...';let x=await(await fetch('/api/scan')).json();s.textContent=' '+x.count+' redes';let h='<table><tr><th>SSID</th><th>BSSID</th><th>CH</th><th>RSSI</th><th>Seguridad</th></tr>';for(let a of x.results)h+='<tr><td>'+a.ssid+'</td><td>'+a.bssid+'</td><td>'+a.channel+'</td><td>'+a.rssi+'</td><td>'+a.auth+'</td></tr>';r.innerHTML=h+'</table>'}async function info(){i.textContent=await(await fetch('/api/info')).text()}async function mon(v){let x=await(await fetch(v?'/api/monitor/start':'/api/monitor/stop')).json();m.textContent=JSON.stringify(x,null,2)}async function resetm(){let x=await(await fetch('/api/monitor/reset')).json();m.textContent=JSON.stringify(x,null,2)}async function deauth(a){m.textContent=JSON.stringify(await(await fetch('/api/lab/deauth?aid='+a)).json(),null,2);stations()}async function stations(){let x=await(await fetch('/api/lab/stations')).json();st.innerHTML=x.stations.map(v=>'<p>'+v.mac+' | RSSI '+v.rssi+' | AID '+v.aid+' <button onclick="deauth('+v.aid+')">Desconectar</button></p>').join('')||'<span class="muted">Sin clientes</span>'}setInterval(async()=>{let x=await(await fetch('/api/monitor')).json();if(x.enabled)m.textContent=JSON.stringify(x,null,2)},1000)</script></body></html>";
-
+"<div class='card'><h2>Monitor / Sniffer</h2><button onclick='mon(1)'>Iniciar</button><button onclick='mon(0)'>Parar</button><button onclick='resetm()'>Reset</button><pre id='m'>Monitor detenido</pre></div>"
+"<div class='card'><h2>Equipo</h2><button onclick='info()'>Device Info</button><pre id='i'></pre></div>"
+"<script>async function scan(){s.textContent=' escaneando...';let x=await(await fetch('/api/scan')).json();s.textContent=' '+x.count+' redes';let h='<table><tr><th>SSID</th><th>BSSID</th><th>CH</th><th>RSSI</th><th>Seguridad</th></tr>';for(let a of x.results)h+='<tr><td>'+a.ssid+'</td><td>'+a.bssid+'</td><td>'+a.channel+'</td><td>'+a.rssi+'</td><td>'+a.auth+'</td></tr>';r.innerHTML=h+'</table>'}async function info(){i.textContent=await(await fetch('/api/info')).text()}async function mon(v){let x=await(await fetch(v?'/api/monitor/start':'/api/monitor/stop')).json();m.textContent=JSON.stringify(x,null,2)}async function resetm(){let x=await(await fetch('/api/monitor/reset')).json();m.textContent=JSON.stringify(x,null,2)}setInterval(async()=>{let x=await(await fetch('/api/monitor')).json();if(x.enabled)m.textContent=JSON.stringify(x,null,2)},1000)</script></body></html>";
 
 static volatile bool monitor_enabled=false;
 static volatile uint32_t rx_total=0,rx_mgmt=0,rx_ctrl=0,rx_data=0;
@@ -41,7 +41,7 @@ static void promisc_cb(void *buf,wifi_promiscuous_pkt_type_t type){
     if(type==WIFI_PKT_MGMT){
         rx_mgmt++;
         if(len>=2){
-            uint8_t fc0=d[0], fc1=d[1];
+            uint8_t fc0=d[0];
             uint8_t st=(fc0>>4)&0x0f;
             if(st==8) rx_beacon++;
             else if(st==4) rx_probe_req++;
@@ -75,44 +75,6 @@ static esp_err_t monitor_set(bool on){
         return esp_wifi_set_promiscuous(true);
     }
     return esp_wifi_set_promiscuous(false);
-}
-
-
-
-static esp_err_t lab_stations_get(httpd_req_t *req){
-    wifi_sta_list_t list={0};
-    esp_err_t e=esp_wifi_ap_get_sta_list(&list);
-    if(e!=ESP_OK){httpd_resp_set_status(req,"500 Internal Server Error");return httpd_resp_sendstr(req,"{\"error\":\"station list failed\"}");}
-    char *out=malloc(2048);
-    if(!out)return ESP_ERR_NO_MEM;
-    int p=snprintf(out,2048,"{\"count\":%d,\"stations\":[",list.num);
-    for(int i=0;i<list.num && p<1900;i++){
-        uint16_t aid=0;
-        esp_wifi_ap_get_sta_aid(list.sta[i].mac,&aid);
-        char m[18];macstr(list.sta[i].mac,m);
-        p+=snprintf(out+p,2048-p,"%s{\"mac\":\"%s\",\"rssi\":%d,\"aid\":%u}",
-                    i?",":"",m,list.sta[i].rssi,(unsigned)aid);
-    }
-    snprintf(out+p,2048-p,"]}");
-    httpd_resp_set_type(req,"application/json");
-    esp_err_t r=httpd_resp_send(req,out,HTTPD_RESP_USE_STRLEN);
-    free(out);
-    return r;
-}
-
-static esp_err_t lab_deauth_get(httpd_req_t *req){
-    char q[32]={0};
-    int n=httpd_req_get_url_query_len(req);
-    if(n<=0 || n>=sizeof(q)){httpd_resp_set_status(req,"400 Bad Request");return httpd_resp_sendstr(req,"{\"error\":\"missing aid\"}");}
-    if(httpd_req_get_url_query_str(req,q,sizeof(q))!=ESP_OK){httpd_resp_set_status(req,"400 Bad Request");return httpd_resp_sendstr(req,"{\"error\":\"bad query\"}");}
-    char v[8]={0};
-    if(httpd_query_key_value(q,"aid",v,sizeof(v))!=ESP_OK){httpd_resp_set_status(req,"400 Bad Request");return httpd_resp_sendstr(req,"{\"error\":\"missing aid\"}");}
-    int aid=atoi(v);
-    if(aid<=0 || aid>2007){httpd_resp_set_status(req,"400 Bad Request");return httpd_resp_sendstr(req,"{\"error\":\"invalid aid\"}");}
-    esp_err_t e=esp_wifi_deauth_sta((uint16_t)aid);
-    char b[96];snprintf(b,sizeof(b),"{\"ok\":%s,\"aid\":%d}",e==ESP_OK?"true":"false",aid);
-    httpd_resp_set_type(req,"application/json");
-    return httpd_resp_send(req,b,HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t monitor_get(httpd_req_t *req){
@@ -171,9 +133,9 @@ static esp_err_t scan_get(httpd_req_t *req){
  snprintf(out+p,10000-p,"]}"); if(was_monitor) monitor_set(true); httpd_resp_set_type(req,"application/json");esp_err_t r=httpd_resp_send(req,out,HTTPD_RESP_USE_STRLEN);free(out);return r;
 }
 static httpd_handle_t start_web_server(void){
- httpd_config_t c=HTTPD_DEFAULT_CONFIG();c.max_uri_handlers=14;httpd_handle_t s=NULL;if(httpd_start(&s,&c)!=ESP_OK)return NULL;
- const httpd_uri_t u[]={{.uri="/",.method=HTTP_GET,.handler=index_get},{.uri="/api/info",.method=HTTP_GET,.handler=info_get},{.uri="/api/scan",.method=HTTP_GET,.handler=scan_get},{.uri="/api/monitor",.method=HTTP_GET,.handler=monitor_get},{.uri="/api/monitor/start",.method=HTTP_GET,.handler=monitor_start_get},{.uri="/api/monitor/stop",.method=HTTP_GET,.handler=monitor_stop_get},{.uri="/api/monitor/reset",.method=HTTP_GET,.handler=monitor_reset_get},{.uri="/api/lab/stations",.method=HTTP_GET,.handler=lab_stations_get},{.uri="/api/lab/deauth",.method=HTTP_GET,.handler=lab_deauth_get}};
- for(size_t i=0;i<9;i++){ ESP_ERROR_CHECK(httpd_register_uri_handler(s,&u[i])); }
+ httpd_config_t c=HTTPD_DEFAULT_CONFIG();c.max_uri_handlers=7;httpd_handle_t s=NULL;if(httpd_start(&s,&c)!=ESP_OK)return NULL;
+ const httpd_uri_t u[]={{.uri="/",.method=HTTP_GET,.handler=index_get},{.uri="/api/info",.method=HTTP_GET,.handler=info_get},{.uri="/api/scan",.method=HTTP_GET,.handler=scan_get},{.uri="/api/monitor",.method=HTTP_GET,.handler=monitor_get},{.uri="/api/monitor/start",.method=HTTP_GET,.handler=monitor_start_get},{.uri="/api/monitor/stop",.method=HTTP_GET,.handler=monitor_stop_get},{.uri="/api/monitor/reset",.method=HTTP_GET,.handler=monitor_reset_get}};
+ for(size_t i=0;i<7;i++){ ESP_ERROR_CHECK(httpd_register_uri_handler(s,&u[i])); }
  return s;
 }
 static void wifi_event_handler(void *arg,esp_event_base_t base,int32_t id,void *data){
