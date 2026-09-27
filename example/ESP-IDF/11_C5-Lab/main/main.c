@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
+#include <stdbool.h>
 #include "nvs_flash.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
@@ -21,7 +22,7 @@ static const char INDEX_HTML[] =
 "<style>body{font-family:system-ui;background:#101318;color:#eee;padding:16px}.card{background:#191e26;padding:14px;margin:10px 0;border-radius:12px}button{padding:10px;margin:4px;border:0;border-radius:8px;background:#2875e8;color:white}table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #333;text-align:left}.muted{color:#aaa}</style></head>"
 "<body><h1>C5-Lab</h1><div class='card'><b>Uso autorizado únicamente</b><p class='muted'>Utiliza esta herramienta solo en redes y dispositivos que tengas permiso para auditar. Bajo tu propia responsabilidad.</p></div>"
 "<div class='card'><h2>Wi-Fi</h2><button onclick='scan()'>Escanear redes</button><span id='s'></span><div id='r'></div></div>"
-"<div class='card'><h2>Monitor / Sniffer</h2><button onclick='mon(1)'>Iniciar</button><button onclick='mon(0)'>Parar</button><button onclick='resetm()'>Reset</button><pre id='m'>Monitor detenido</pre></div>""<div class='card'><h2>Equipo</h2><button onclick='info()'>Device Info</button><pre id='i'></pre></div>"
+"<div class='card'><h2>Monitor / Sniffer</h2><button onclick='mon(1)'>Iniciar</button><button onclick='mon(0)'>Parar</button><button onclick='resetm()'>Reset</button><pre id='m'>Monitor detenido</pre></div>" "<div class='card'><h2>Equipo</h2><button onclick='info()'>Device Info</button><pre id='i'></pre></div>"
 "<script>async function scan(){s.textContent=' escaneando...';let x=await(await fetch('/api/scan')).json();s.textContent=' '+x.count+' redes';let h='<table><tr><th>SSID</th><th>BSSID</th><th>CH</th><th>RSSI</th><th>Seguridad</th></tr>';for(let a of x.results)h+='<tr><td>'+a.ssid+'</td><td>'+a.bssid+'</td><td>'+a.channel+'</td><td>'+a.rssi+'</td><td>'+a.auth+'</td></tr>';r.innerHTML=h+'</table>'}async function info(){i.textContent=await(await fetch('/api/info')).text()}async function mon(v){let x=await(await fetch(v?'/api/monitor/start':'/api/monitor/stop')).json();m.textContent=JSON.stringify(x,null,2)}async function resetm(){let x=await(await fetch('/api/monitor/reset')).json();m.textContent=JSON.stringify(x,null,2)}setInterval(async()=>{let x=await(await fetch('/api/monitor')).json();if(x.enabled)m.textContent=JSON.stringify(x,null,2)},1000)</script></body></html>";
 
 
@@ -72,7 +73,7 @@ static esp_err_t monitor_set(bool on){
         if(e!=ESP_OK){monitor_enabled=false;return e;}
         return esp_wifi_set_promiscuous(true);
     }
-    return bool was_monitor=monitor_enabled;\n esp_wifi_set_promiscuous(false);
+    return esp_wifi_set_promiscuous(false);
 }
 
 static esp_err_t monitor_get(httpd_req_t *req){
@@ -120,6 +121,7 @@ static esp_err_t info_get(httpd_req_t *req){
  httpd_resp_set_type(req,"application/json");return httpd_resp_send(req,b,HTTPD_RESP_USE_STRLEN);
 }
 static esp_err_t scan_get(httpd_req_t *req){
+ bool was_monitor=monitor_enabled;
  esp_wifi_set_promiscuous(false);
  wifi_scan_config_t cfg={0};cfg.show_hidden=true;cfg.scan_type=WIFI_SCAN_TYPE_ACTIVE;
  esp_err_t e=esp_wifi_scan_start(&cfg,true);if(e!=ESP_OK){httpd_resp_set_status(req,"500 Internal Server Error");return httpd_resp_sendstr(req,"{\"error\":\"scan failed\"}");}
@@ -132,7 +134,8 @@ static esp_err_t scan_get(httpd_req_t *req){
 static httpd_handle_t start_web_server(void){
  httpd_config_t c=HTTPD_DEFAULT_CONFIG();c.max_uri_handlers=10;httpd_handle_t s=NULL;if(httpd_start(&s,&c)!=ESP_OK)return NULL;
  const httpd_uri_t u[]={{.uri="/",.method=HTTP_GET,.handler=index_get},{.uri="/api/info",.method=HTTP_GET,.handler=info_get},{.uri="/api/scan",.method=HTTP_GET,.handler=scan_get},{.uri="/api/monitor",.method=HTTP_GET,.handler=monitor_get},{.uri="/api/monitor/start",.method=HTTP_GET,.handler=monitor_start_get},{.uri="/api/monitor/stop",.method=HTTP_GET,.handler=monitor_stop_get},{.uri="/api/monitor/reset",.method=HTTP_GET,.handler=monitor_reset_get}};
- for(size_t i=0;i<7;i++){ ESP_ERROR_CHECK(httpd_register_uri_handler(s,&u[i])); }\n return s;
+ for(size_t i=0;i<7;i++){ ESP_ERROR_CHECK(httpd_register_uri_handler(s,&u[i])); }
+ return s;
 }
 static void wifi_event_handler(void *arg,esp_event_base_t base,int32_t id,void *data){
  if(id==WIFI_EVENT_AP_STACONNECTED){wifi_event_ap_staconnected_t *e=data;ESP_LOGI(TAG,"Station connected: "MACSTR,MAC2STR(e->mac));}
