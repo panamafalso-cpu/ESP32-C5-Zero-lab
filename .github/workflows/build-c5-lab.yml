@@ -1,0 +1,34 @@
+name: Build C5-Lab
+
+on:
+  push:
+    paths:
+      - "example/ESP-IDF/11_C5-Lab/**"
+      - ".github/workflows/build-c5-lab.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:release-v5.5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build ESP32-C5 firmware
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          cd example/ESP-IDF/11_C5-Lab
+          idf.py set-target esp32c5
+          idf.py build
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: c5-lab-firmware
+          path: |
+            example/ESP-IDF/11_C5-Lab/build/bootloader/bootloader.bin
+            example/ESP-IDF/11_C5-Lab/build/partition_table/partition-table.bin
+            example/ESP-IDF/11_C5-Lab/build/c5_lab.bin
+            example/ESP-IDF/11_C5-Lab/build/flash_args
